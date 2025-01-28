@@ -1,3 +1,42 @@
+function trade_equilibrium(trade_params)
+    # multiple dispatch function to compute trade equilibrium
+    # just needs trade parameters and returns
+    # the equilibrium wages, tariff revenue, and trade statistics
+
+    f(x) = trade_equilibrium(x, trade_params)
+
+    function f!(fvec, x)
+
+        fvec .= f(x)
+
+    end
+
+
+    xguess = vcat(ones(trade_params.Ncntry - 1), zeros(trade_params.Ncntry))
+
+    n = length(xguess)
+    diag_adjust = n - 1
+
+    sol = fsolve(f!, xguess, show_trace = true, method = :hybr;
+        ml=diag_adjust, mu=diag_adjust,
+        diag=ones(n),
+        mode= 1,
+        tol=1e-10,)
+
+
+    w = [sol.x[1] ; 1.0]
+
+    w = w ./ ( sum(w) / trade_params.Ncntry)
+
+    τrev = sol.x[2:end]
+
+    out = trade_equilibrium(w, τrev, trade_params, display = true)
+
+    println(out.Qindex[1])
+
+    return w, τrev, out
+
+end
 
 
 ##########################################################################
