@@ -1,4 +1,4 @@
-
+using Plots
 
 τvec = 0.01:0.01:0.50
 
@@ -6,7 +6,7 @@ welfare = Array{Float64}(undef, length(τvec))
 
 revenue = similar(welfare)
 
-trd_prm = trade_params(τ = [0.0 0.0; 0.0 0.0], θ = 3.0, d = [1.0  1.5; 1.5 1.0])
+trd_prm = trade_params(τ = [0.0 0.0; 0.0 0.0], θ = 5.0, d = [1.0  1.5; 1.5 1.0])
 
 
 for xxx = 1:length(τvec)

@@ -1,4 +1,4 @@
-function trade_equilibrium(trade_params)
+function trade_equilibrium(trade_params; display = true)
     # multiple dispatch function to compute trade equilibrium
     # just needs trade parameters and returns
     # the equilibrium wages, tariff revenue, and trade statistics
@@ -17,7 +17,7 @@ function trade_equilibrium(trade_params)
     n = length(xguess)
     diag_adjust = n - 1
 
-    sol = fsolve(f!, xguess, show_trace = true, method = :hybr;
+    sol = fsolve(f!, xguess, show_trace = display, method = :hybr;
         ml=diag_adjust, mu=diag_adjust,
         diag=ones(n),
         mode= 1,
