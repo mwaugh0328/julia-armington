@@ -79,15 +79,13 @@ function ces(p, AD, θ; α = 1.0)
     # α is the share parameter (should be size of p)    
     # AD is the expenditure vector
 
-    
     Φ = sum( α.*p.^(- θ), dims = 1)
-    # sum across the columns is how muc each 
 
     P = Φ.^( -1.0 / θ )
 
     Q = AD / P
 
-    q = @. α * p^(-θ - 1.0) / Φ * AD
+    q = @. α * ( p^(-θ - 1.0) / Φ )* AD
 
     shares = @. α *p^( -θ ) / Φ
 
@@ -127,10 +125,10 @@ function trade_flows(demand, trade_params)
 
             trade_share[importer, : ] = demand[importer].shares
 
-            τ_revenue[importer, :] = @. ( τ[importer, :] / (1.0 + τ[importer, : ])) * trade_value[importer, :]
-            # the adjustment is to net out of price the tariff.
-            # the interpertation is that this revenue buyer country recives when importing
-            # from suplier country
+            τ_revenue[importer, :] = @.  τ[importer, :] * ( trade_value[importer, :] / (1.0 + τ[importer, : ]) )
+            # this is the tariff revenue that is being collected by the importer country
+            # trade_value / (1 + τ) is the value of the good after the tariff is applied
+            # the tariff is then applied to this value to get the revenue
 
             p[importer, :] = demand[importer].p
 

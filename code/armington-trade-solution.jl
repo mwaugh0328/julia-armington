@@ -90,7 +90,7 @@ function trade_equilibrium(w, τrev, trade_params; display = false)
     demand = goods_prices(w, AD, trade_params)
 
 
-    # Step 3. Compute trade flows and trade statistics
+    # Step 3. Compute trade flows and trade statistics given demand stucture
     trade = trade_flows(demand, trade_params)
 
     ##########################################################################
