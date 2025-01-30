@@ -43,6 +43,44 @@ end
 
 # end
 
+function replace_tariff!(tariff_matrix, row_index, new_row)
+    tariff_matrix[row_index, :] = new_row
+
+    if tariff_matrix[row_index, row_index] != 0.0
+        tariff_matrix[row_index, row_index] = 0.0;
+    end
+
+end
+
+
+
+function make_ek_dataset(data_path = ".\\data\\ek-data\\")
+
+    # Construct file paths using joinpath
+    ek_data_path = joinpath(data_path, "ek-data.csv")
+    ek_language_path = joinpath(data_path, "ek-language.csv")
+    ek_labor_path = joinpath(data_path, "ek-labor.csv")
+    ek_cntryfix_path = joinpath(data_path, "ek-cntryfix.csv")
+
+    # Read CSV files into DataFrames
+    dftrade = DataFrame(CSV.File(ek_data_path))
+    dflang = DataFrame(CSV.File(ek_language_path))
+    dflabor = DataFrame(CSV.File(ek_labor_path))
+
+    # Filter out rows where trade is exactly 1.0 or 0.0
+    filter!(row -> ~(row.trade ≈ 1.0), dftrade)
+    filter!(row -> ~(row.trade ≈ 0.0), dftrade)
+
+    # Combine dftrade and dflang DataFrames horizontally
+    dftrade = hcat(dftrade, dflang)
+
+    # Read the country fix DataFrame
+    dfcntryfix = DataFrame(CSV.File(ek_cntryfix_path))
+
+    return dftrade, dfcntryfix, dflabor
+
+end
+
 ##########################################################################
 ##########################################################################
 

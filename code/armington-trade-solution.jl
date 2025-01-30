@@ -3,7 +3,7 @@ function trade_equilibrium(trade_params; display = true)
     # just needs trade parameters and returns
     # the equilibrium wages, tariff revenue, and trade statistics
 
-    f(x) = trade_equilibrium(x, trade_params)
+    f(x) = trade_equilibrium(exp_wages(x, trade_params.Ncntry), trade_params)
 
     function f!(fvec, x)
 
@@ -12,7 +12,9 @@ function trade_equilibrium(trade_params; display = true)
     end
 
 
-    xguess = vcat(ones(trade_params.Ncntry - 1), zeros(trade_params.Ncntry))
+    xguess = vcat(trd_prm.A[1:(trade_params.Ncntry - 1)], zeros(trade_params.Ncntry))
+
+    xguess = log_wages(xguess, trade_params.Ncntry)
 
     n = length(xguess)
     diag_adjust = n - 1
@@ -23,20 +25,49 @@ function trade_equilibrium(trade_params; display = true)
         mode= 1,
         tol=1e-10,)
 
+    if sol.converged != true
 
-    w = [sol.x[1] ; 1.0]
+        println("Convergence failed")
+
+    end
+
+
+    w = [exp.(sol.x[1:(trade_params.Ncntry - 1)]) ; 1.0]
 
     w = w ./ ( sum(w) / trade_params.Ncntry)
 
-    τrev = sol.x[2:end]
+    τrev = sol.x[trade_params.Ncntry:end]
+
+    # println(w)
+    # println(τrev)
 
     out = trade_equilibrium(w, τrev, trade_params, display = true)
 
-    println(out.Qindex[1])
+    println(out.Qindex[19])
 
     return w, τrev, out
 
 end
+
+##########################################################################
+##########################################################################
+
+function log_wages(xxx, Ncntry)
+    # function to compute log wages
+    # where xxx is the wage and tariff revene vector
+
+    return vcat(log.(xxx[1:Ncntry - 1]), xxx[Ncntry:end])
+
+end
+
+function exp_wages(xxx, Ncntry)
+    # function to compute exp wages
+    # where xxx is the wage and tariff revene vector
+
+    return vcat(exp.(xxx[1:Ncntry - 1]), xxx[Ncntry:end])
+
+end
+
 
 
 ##########################################################################
