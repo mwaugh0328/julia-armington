@@ -41,6 +41,43 @@ end
 
 ##########################################################################
 ##########################################################################
+function trade_equilibrium_gravity(xxx, gravity_results, trade_parameters; display = false)
+    # multiple dispacth function to compute trade equilibrium
+    # takes a vector of wages and tariff revenue and trade parameters
+    # returns the difference between production and demand and the guessed tariff transfer
+
+    @unpack Ncntry = trade_parameters
+
+    w = xxx[1:Ncntry - 1]
+
+    push!(w, 1.0) # add the numeraire
+
+    w = w ./ ( sum(w) / Ncntry)
+
+    A = make_technology(gravity_results, w , trade_parameters.θ, model = "armington")
+
+    τrev = xxx[Ncntry:end]
+
+    @assert length(w) == length(τrev)
+
+    foo_trade_params = trade_params(trade_parameters, A = A)
+
+    if display == false
+
+        return trade_equilibrium(w, τrev, foo_trade_params, display = display)
+
+    else
+
+        return trade_equilibrium(w, τrev, foo_trade_params, display = display), A
+
+    end
+
+end
+
+
+
+##########################################################################
+##########################################################################
 
 function trade_equilibrium(xxx, trade_params)
     # multiple dispacth function to compute trade equilibrium
