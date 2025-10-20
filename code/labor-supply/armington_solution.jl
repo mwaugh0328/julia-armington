@@ -104,15 +104,24 @@ function find_equilibrium(w, τrev, params::armington_params; display = false)
 
     τ_zero = similar(w)
 
+    Pces = goods_prices(params, w)
+
+    # println(" ")
+    # println(Pces)
+
     # Step 1. Compute aggregate demand = labor income + tariff revenue
-    AD_vec, L_vec = compute_AD(params, w, τrev)
+    AD_vec, L_vec = compute_AD(params, w, Pces, τrev)
     #AD = w.*N .+ τrev
 
     # Step 2. Compute prices and demand for each country good
     demand = goods_prices(params, w, AD_vec)
 
     # Step 3. Compute trade flows and trade statistics given demand stucture
-    trade = trade_flows(params, demand)
+    trade = trade_flows(params, demand, L_vec)
+
+    
+    # println(" ")
+    # println(trade.Pindex)
 
     # Step 4. Compute trade balance
     trd_blnce = compute_trade_balance(params, AD_vec, trade.trade_share, τrev)
@@ -124,6 +133,7 @@ function find_equilibrium(w, τrev, params::armington_params; display = false)
     residuals = vcat(trd_blnce, τ_zero)
 
     if utility_type == :CRRA
+        
 
         L_demand = trade.world_demand ./ w
         # L_demand is the labor demand from the world market
@@ -198,7 +208,7 @@ end
     - 'AD_vec' : a (Ncntry x 1) vector of aggregate demand for each country
     - 'L_vec' : a (Ncntry x 1) vector of labor supply for each country
 """
-function compute_AD(params::armington_params, w, τrev)
+function compute_AD(params::armington_params, w, Pces, τrev)
 
     @unpack Ncntry = params
 
@@ -208,7 +218,7 @@ function compute_AD(params::armington_params, w, τrev)
 
     for i in 1:Ncntry
 
-        L, AD = household_problem(params, w[i], τrev[i])
+        L, AD = household_problem(params, w[i], Pces[i],τrev[i])
 
         AD_vec[i] = AD
 

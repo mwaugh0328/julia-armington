@@ -5,14 +5,14 @@ using Parameters
 ##########################################################################
 ##########################################################################
 @with_kw struct armington_params
-    σ::Float64 = 4.0 # elasticity of substitution across goods
+    σ::Float64 = 5.0 # elasticity of substitution across goods
     d::Array{Float64} = [1.0  1.95; 1.95 1.0] # iceberg trade cost (row is importer, colume is exporter)
     A::Array{Float64} = [1.0, 1.0] # productivity
     N::Array{Float64} = [1.0, 1.0] # population
     Ncntry::Int64 = length(A) # number of countries
     τ::Array{Float64} = zeros(length(A), length(A)) # tariff (row is importer, colume is exporter)
     ψ::Float64 = 2.0 # disutility of labor parameter in GHH
-    γ::Float64 = 2.0 # risk aversion parameter in GHH 
+    γ::Float64 = 1.0 # risk aversion parameter in GHH 
     utility_type::Symbol = :inelastic  # options: :inelastic, :GHH, :CRRA
 end
 
@@ -22,6 +22,7 @@ end
     p::Array{Float64} # Individual prices (Ncntry x 1)
     q::Array{Float64} # Quantity demanded (Ncntry x 1)
     shares::Array{Float64} # trade shares (Ncntry x 1)
+    w::Array{Float64} # wages (Ncntry x 1)
 end
 
 @with_kw struct trade_stats
@@ -32,6 +33,8 @@ end
     p::Array{Float64} # (Ncntry x Ncntry)
     Pindex::Array{Float64} # (Ncntry x 1)
     Qindex::Array{Float64} # (Ncntry x 1)
+    prft::Array{Float64} # (Ncntry x 1)
+    Ls::Array{Float64}
 end
 
 ##########################################################################
@@ -68,13 +71,48 @@ function goods_prices(params::armington_params, w, AD)
             
         end
 
-        demand[im] = ces(params, p[im, :], AD[im])
+        demand[im] = ces(params, p[im, :], AD[im], w)
         # demand is a structure that has the price index, quantity index, 
         # the quantity demanded, prices, and the shares
 
     end
 
     return demand
+
+end
+
+function goods_prices(params::armington_params, w)
+
+    @unpack τ, d, A, Ncntry, σ = params
+
+    @assert length(w) == Ncntry
+    
+    p = Array{eltype(w)}(undef, Ncntry, Ncntry)
+    marginal_cost = Array{eltype(w)}(undef, Ncntry)
+    Pindex = Array{eltype(w)}(undef, Ncntry)
+
+    for im in 1:Ncntry 
+
+        for ex in 1:Ncntry 
+
+            marginal_cost = (w[ex] / A[ex])
+
+            p[im, ex] = (1.0 + τ[im, ex]) * d[im, ex] * marginal_cost
+            # price is the marginal cost of production plus the cost of trade and the tariff
+            
+        end
+    end
+
+    for im in 1:Ncntry
+
+        Pindex[im] = ces(params, p[im, :])[1]
+        # println(Pindex)
+
+    end
+
+    #print(p)
+
+    return Pindex
 
 end
 
@@ -92,7 +130,7 @@ end
 # Returns
     - a 'ces_output' struct 
 """
-function ces(params::armington_params, p, AD)
+function ces(params::armington_params, p, AD, w)
 
     @unpack σ = params
     
@@ -110,8 +148,46 @@ function ces(params::armington_params, p, AD)
 
     @assert sum(p.*q) ≈ AD
 
-    return ces_output(P, Q, p, q, shares)
+    return ces_output(P, Q, p, q, shares, w)
     
+end
+
+function ces(params::armington_params, p)
+
+    @unpack σ = params
+    
+    Φ = sum( p.^(1 - σ), dims = 1)
+
+    #print(p)
+
+    P = Φ .^ (1 / (1 - σ))
+
+    return P
+    
+end
+
+##########################################################################
+##########################################################################
+function profits(params::armington_params, demand, L)
+
+    @unpack Ncntry, A, τ = params
+
+    prft = similar(L)
+
+    for ex in 1:Ncntry
+
+        p_ex_tariff = demand[ex].p ./ (1 .+ τ[ex,:])
+
+        total_revenue = sum( p_ex_tariff .* demand[ex].q )
+
+        total_cost = demand[ex].w[ex] * L[ex]
+
+        prft[ex] = total_revenue - total_cost
+
+    end
+
+    return prft
+
 end
 
 ##########################################################################
@@ -126,7 +202,7 @@ end
 # Returns
     - 'trade' : a 'trade_stats' struct contains aggregate trade statistics
 """
-function trade_flows(params::armington_params, demand)
+function trade_flows(params::armington_params, demand, L_vec)
 
     @unpack Ncntry, τ, σ = params
 
@@ -137,6 +213,7 @@ function trade_flows(params::armington_params, demand)
 
     Pindex = Array{eltype(σ)}(undef, Ncntry)
     Qindex = Array{eltype(σ)}(undef, Ncntry)
+    prft = Array{eltype(σ)}(undef, Ncntry)
  
     for im = 1:Ncntry # buyer
 
@@ -157,14 +234,17 @@ function trade_flows(params::armington_params, demand)
 
             Qindex[im] = demand[im].Q[1]
 
+
     end
 
+    prft = profits(params, demand, L_vec)
+    
     world_demand = sum(trade_value ./ (1 .+ τ), dims = 1)[:]
     # sum down the rows give the total amount demanded of each good that exporter must produce.
     # This is pre-tariff value of exported goods.
 
     trade = trade_stats(
-        trade_value, trade_share, τ_revenue, world_demand, p, Pindex, Qindex
+        trade_value, trade_share, τ_revenue, world_demand, p, Pindex, Qindex, prft, L_vec
         )
 
     return trade
@@ -187,7 +267,7 @@ end
     - 'L' : a (scalar) labor supply from the household
     - 'AD' : a (scalar) aggregate demand of the household
 """
-function household_problem(params::armington_params, w, τrev)
+function household_problem(params::armington_params, w, Pces, τrev)
 
     @unpack ψ, γ, N, utility_type = params
 
@@ -201,7 +281,7 @@ function household_problem(params::armington_params, w, τrev)
 
     elseif utility_type == :GHH
 
-        L = (w / ψ) ^ (1 / γ)
+        L = ((w / Pces) / ψ) ^ (1 / γ)
 
         AD = w * L + τrev
 
