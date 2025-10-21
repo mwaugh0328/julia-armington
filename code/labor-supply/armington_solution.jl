@@ -1,14 +1,4 @@
-"""
-    Multiple dispatch function to compute trade equilibrium
 
-# Arguments
-    - 'params' : an 'armington_params' struct containing model parameters
-
-# Returns
-    - 'trade' : a 'trade_stats' struct containing aggregate trade statistics
-    - 'w' : a (Ncntry x 1) vector of equilibrium wages in each country
-    - 'τrev' : a (Ncntry x 1) vector of equilibrium guessed tariff revenue
-"""
 function find_equilibrium(params::armington_params)
 
     f(x) = find_equilibrium(x, params)
@@ -38,28 +28,17 @@ function find_equilibrium(params::armington_params)
 
     w = [sol.x[1]; 1.0]
 
-    τrev = sol.x[2:end]
+    policy_var = sol.x[2:end]
 
-    trade = find_equilibrium(w, τrev, params, display = true)
+    trade = find_equilibrium(w, policy_var, params, display = true)
 
-    return trade, w, τrev
+    return trade, w, policy_var
 
 end
 
 ##########################################################################
 ##########################################################################
 
-"""
-    Multiple dispacth function to compute equilibrium
-
-# Arguments
-    - 'xxx' : a ((2*Ncntry) x 1) vector of wages and tariff revenue
-    - 'params' : an 'armington_params' struct containing model parameters
-
-# Returns
-- 'find_equilibrium' : a 2*(Ncntry)-1 vector of trade balance for each country, 
-                       and zero tariff revenue condition except for the last country
-"""
 function find_equilibrium(xxx, params::armington_params)
    
     @unpack Ncntry = params
@@ -70,48 +49,32 @@ function find_equilibrium(xxx, params::armington_params)
 
     #w = w ./ ( sum(w) / params.Ncntry)
 
-    τrev = xxx[Ncntry:end]
+    policy_var = xxx[Ncntry:end]
 
-    @assert length(w) == length(τrev)
+    @assert length(w) == length(policy_var)
 
-    return find_equilibrium(w, τrev, params)
+    return find_equilibrium(w, policy_var, params)
 
 end
 
 ##########################################################################
 ##########################################################################
 
-"""
-    Constructs zero functions of equilibrium conditions for the model.
+function find_equilibrium(w, policy_var, params::armington_params; display = false)
     
-# Arguments
-    - 'w' : a (Ncntry x 1) vector of wages in each country
-    - 'τrev' : a (Ncntry x 1) vector of guessed tariff revenue
-    - 'params' : an 'armington_params' struct containing model parameters
+    #@assert length(w) == length(τrev)
 
-# Keyword Arguments
-    - 'display' : a boolean to display trade statistics or not. Set to 'false' when solve for equilibrium.
+    @unpack A, Ncntry, N, utility_type, rebate_type = params
 
-# Returns
-    - If display == 'false' : a (Ncntry x 1) vector of trade balance and guessed tariff revenue
-    - If display == 'true' : a 'trade_output' struct containing trade statistics
-"""
-function find_equilibrium(w, τrev, params::armington_params; display = false)
-    
-    @assert length(w) == length(τrev)
-
-    @unpack A, Ncntry, N, utility_type = params
-
-    τ_zero = similar(w)
-
+    # --- Step 1: Solve household problem to get AD and Ls ---
     Pces = goods_prices(params, w)
+    AD_vec = similar(w)
+    L_vec = similar(w)
 
-    # println(" ")
-    # println(Pces)
-
-    # Step 1. Compute aggregate demand = labor income + tariff revenue
-    AD_vec, L_vec = compute_AD(params, w, Pces, τrev)
-    #AD = w.*N .+ τrev
+    for i in 1:Ncntry
+        L, AD = household_problem(params, w[i], Pces[i], policy_var[i])
+        AD_vec[i], L_vec[i] = AD, L
+    end
 
     # Step 2. Compute prices and demand for each country good
     demand = goods_prices(params, w, AD_vec)
@@ -119,32 +82,30 @@ function find_equilibrium(w, τrev, params::armington_params; display = false)
     # Step 3. Compute trade flows and trade statistics given demand stucture
     trade = trade_flows(params, demand, L_vec)
 
+    # Step 4. Compute trade balance/market clearing
+    #trd_blnce = compute_trade_balance(params, AD_vec, trade.trade_share, τrev)
+    MC_residual = compute_market_clearing(w, L_vec, trade)
+
+    # Step 5: Compute budget balance residuals based on the policy
+    BB_residual = similar(w)
+
+    if rebate_type == :lump_sum
+        # Residual is: Guessed lump-sum revenue - Actual tariff revenue
+        τrev = policy_var
+        BB_residual = τrev .- sum(trade.τ_revenue, dims = 2)[:]
+
+    elseif rebate_type == :labor_tax
+        # Residual is: Actual tariff revenue - Labor tax revenue 
+        tax_l = policy_var
+        actual_tariff_revenue = sum(trade.τ_revenue, dims = 2)[:]
+        labor_tax_revenue = tax_l .* w .* L_vec
+        BB_residual = actual_tariff_revenue .- labor_tax_revenue
     
-    # println(" ")
-    # println(trade.Pindex)
-
-    # Step 4. Compute trade balance
-    trd_blnce = compute_trade_balance(params, AD_vec, trade.trade_share, τrev)
-
-    # Step 5. Compute zero function for tarff revene, i.e. how does the 
-    # guess of tariff revenue compare to the realized tariff revenue
-    τ_zero .= τrev .- sum(trade.τ_revenue, dims = 2)[:]
-
-    residuals = vcat(trd_blnce, τ_zero)
-
-    if utility_type == :CRRA
-        
-
-        L_demand = trade.world_demand ./ w
-        # L_demand is the labor demand from the world market
-        # which is equal to the total amount of goods produced in the world 
-        # divided by the wage in each country
-
-        labor_residual = L_vec - L_demand
-
-        residuals = vcat(residuals, labor_residual)
-        
+    else
+        error("Unknown rebate_type: $(rebate_type)")
     end
+
+    residuals = vcat(MC_residual, BB_residual)
 
     if display 
 
@@ -160,54 +121,110 @@ function find_equilibrium(w, τrev, params::armington_params; display = false)
 
 end
 
-##########################################################################
-##########################################################################
-
-"""
-    Compute trade (im)balance. If takes out tariff revenue from both sides, 
-    it becomes a labor market clearing condition.
-
-# Arguments
-    - 'params' : an 'armington_params' struct containing model parameters
-    - 'AD' : a (Ncntry x 1) vector of total expenditure (wage income + tariff revenue) of each country
-    - 'trade_share' : a (Ncntry x Ncntry) matrix of trade shares
-    - 'τrev' : a (Ncntry x 1) vector of guessed tariff revenue
-
-# Returns 
-    - 'trade_balance' : a (Ncntry x 1) vector of trade balance for each country
-"""
-function compute_trade_balance(params::armington_params, AD, trade_share, τrev)
-
-    @unpack τ = params
+# function find_equilibrium(w, τrev, params::armington_params; display = false)
     
-    trade_balance = similar(AD)
-    Ncntry = length(AD)
+#     @assert length(w) == length(τrev)
 
-    for ex = 1:Ncntry
+#     @unpack A, Ncntry, N, utility_type = params
 
-        trade_balance[ex] = AD[ex] .- (sum(trade_share[:, ex] .* (AD ./ (1 .+ τ[:, ex]))) .+ τrev[ex])
+#     τ_zero = similar(w)
+
+#     Pces = goods_prices(params, w)
+
+#     # println(" ")
+#     # println(Pces)
+
+#     # Step 1. Compute aggregate demand = labor income + tariff revenue
+#     AD_vec, L_vec = compute_AD(params, w, Pces, τrev)
+#     #AD = w.*N .+ τrev
+
+#     # Step 2. Compute prices and demand for each country good
+#     demand = goods_prices(params, w, AD_vec)
+
+#     # Step 3. Compute trade flows and trade statistics given demand stucture
+#     trade = trade_flows(params, demand, L_vec)
+
+    
+#     # println(" ")
+#     # println(trade.Pindex)
+
+#     # Step 4. Compute trade balance/market clearing
+#     #trd_blnce = compute_trade_balance(params, AD_vec, trade.trade_share, τrev)
+#     market_clearing_residuals = compute_market_clearing(w, L_vec, trade)
+
+#     # Step 5. Compute zero function for tarff revene, i.e. how does the 
+#     # guess of tariff revenue compare to the realized tariff revenue
+#     τ_zero .= τrev .- sum(trade.τ_revenue, dims = 2)[:]
+
+#     #residuals = vcat(trd_blnce, τ_zero)
+#     residuals = vcat(market_clearing_residuals, τ_zero)
+
+#     if utility_type == :CRRA
         
-        # the first term is total expenditure (which equals labor income + tariff revenue)
-        # the second term is total income from selling our goods to every country in the world plus tariff revenue
+#         L_demand = trade.world_demand ./ w
+#         # L_demand is the labor demand from the world market
+#         # which is equal to the total amount of goods produced in the world 
+#         # divided by the wage in each country
 
-    end
+#         labor_residual = L_vec - L_demand
 
-    return trade_balance
+#         residuals = vcat(residuals, labor_residual)
+        
+#     end
 
+#     if display 
+
+#         return trade
+
+#     else
+
+#         return residuals[1:end-1] 
+#         # return the trade balance for each country, 
+#         # and the last element is the tariff revenue condition
+
+#     end
+
+# end
+
+##########################################################################
+##########################################################################
+
+# function compute_trade_balance(params::armington_params, AD, trade_share, τrev)
+
+#     @unpack τ = params
+    
+#     trade_balance = similar(AD)
+#     Ncntry = length(AD)
+
+#     for ex = 1:Ncntry
+
+#         trade_balance[ex] = AD[ex] .- (sum(trade_share[:, ex] .* (AD ./ (1 .+ τ[:, ex]))) .+ τrev[ex])
+        
+#         # the first term is total expenditure (which equals labor income + tariff revenue)
+#         # the second term is total income from selling our goods to every country in the world plus tariff revenue
+
+#     end
+
+#     return trade_balance
+
+# end
+
+function compute_market_clearing(w, Ls, trade::trade_stats)
+    
+    # Total payments to labor in each country
+    total_labor_income = w .* Ls
+
+    # Total revenue received by producers in each country from world sales.
+    # trade.world_demand is the pre-tariff value of goods demanded from each exporter.
+    total_producer_revenue = trade.world_demand
+
+    # In equilibrium, these must be equal
+    return total_labor_income .- total_producer_revenue
 end
 
-"""
-    Compute aggregate demand and labor supply for each country.
+##########################################################################
+##########################################################################
 
-# Arguments
-    - 'params' : an 'armington_params' struct containing model parameters
-    - 'w' : a (Ncntry x 1) vector of wages in each country
-    - 'τrev' : a (Ncntry x 1) vector of guessed tariff revenue
-
-# Returns
-    - 'AD_vec' : a (Ncntry x 1) vector of aggregate demand for each country
-    - 'L_vec' : a (Ncntry x 1) vector of labor supply for each country
-"""
 function compute_AD(params::armington_params, w, Pces, τrev)
 
     @unpack Ncntry = params
@@ -218,7 +235,7 @@ function compute_AD(params::armington_params, w, Pces, τrev)
 
     for i in 1:Ncntry
 
-        L, AD = household_problem(params, w[i], Pces[i],τrev[i])
+        L, AD = household_problem(params, w[i], Pces[i], τrev[i])
 
         AD_vec[i] = AD
 

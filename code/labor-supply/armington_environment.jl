@@ -13,8 +13,9 @@ using Parameters
     τ::Array{Float64} = zeros(length(A), length(A)) # tariff (row is importer, colume is exporter)
     ψ::Float64 = 2.0 # disutility of labor parameter in GHH
     γ::Float64 = 1.0 # risk aversion parameter in GHH 
-    utility_type::Symbol = :inelastic  # options: :inelastic, :GHH, :CRRA
+    utility_type::Symbol = :inelastic  # :inelastic, :GHH, :CRRA
     wedges::Array{Float64} = [1.0, 1.0] # product wedges
+    rebate_type::Symbol = :lump_sum # :lump_sum, :labor_tax
 end
 
 @with_kw struct ces_output
@@ -40,17 +41,7 @@ end
 
 ##########################################################################
 ##########################################################################
-"""
-    Constructs prices given wages and overall demand 
 
-# Arguments
-    - 'params' : an 'armington_params' struct containing model parameters
-    - 'w' : a (Ncntry x 1) vector of wages in each country
-    - 'AD' : a (Ncntry x 1) vector of total expenditure (wage income + tariff revenue) of each country
-    
-# Returns 
-    - 'demand' : a vector of 'ces_output' structs, one for each country
-"""
 function goods_prices(params::armington_params, w, AD)
 
     @unpack τ, d, A, Ncntry, σ = params
@@ -120,17 +111,6 @@ end
 ##########################################################################
 ##########################################################################
 
-"""
-    Compute outcomes from CES demand system.
-
-# Arguments
-    - 'params' : an 'armington_params' struct containing model parameters
-    - 'p' : a (Ncntry x 1) vector of prices that a country faces
-    - 'AD' : a (scalar) total expenditure of a country
-
-# Returns
-    - a 'ces_output' struct 
-"""
 function ces(params::armington_params, p, AD, w)
 
     @unpack σ = params
@@ -193,16 +173,7 @@ end
 
 ##########################################################################
 ##########################################################################
-"""
-    Constructs trade flows given outcomes from CES demand system.
 
-# Arguments
-    - 'params' : an 'armington_params' struct containing model parameters
-    - 'demand' : a vector of 'ces_output' structs, one for each country
-
-# Returns
-    - 'trade' : a 'trade_stats' struct contains aggregate trade statistics
-"""
 function trade_flows(params::armington_params, demand, L_vec)
 
     @unpack Ncntry, τ, σ = params
@@ -254,67 +225,111 @@ end
 
 ##########################################################################
 ##########################################################################
+function household_problem(params::armington_params, w, Pces, policy_var)
+    
+    @unpack ψ, γ, N, utility_type, rebate_type = params
 
-"""
-    Solve for household labor and consumption given wage.
-    Supports utility_type ∈ [:inelastic, :GHH, :CRRA]
+    L = 0.0
+    AD = 0.0
 
-# Arguments
-    - 'params' : an 'armington_params' struct containing model parameters
-    - 'w' : a (scalar) wage of the country
-    - 'τrev' : a (scalar) guessed tariff revenue of the country
+    # --- Case 1: Tariff revenue is returned as a lump-sum transfer ---
+    if rebate_type == :lump_sum
+        τrev = policy_var 
 
-# Returns
-    - 'L' : a (scalar) labor supply from the household
-    - 'AD' : a (scalar) aggregate demand of the household
-"""
-function household_problem(params::armington_params, w, Pces, τrev)
+        if utility_type == :inelastic
+            L = N[1]
+            AD = w * L + τrev
+        
+        elseif utility_type == :GHH
+            L = ((w / Pces) / ψ)^(1 / γ)
+            AD = w * L + τrev
+        end
 
-    @unpack ψ, γ, N, utility_type = params
+    # --- Case 2: Tariff revenue is used to reduce the labor income tax ---
+    elseif rebate_type == :labor_tax
+        tax_l = policy_var 
+        after_tax_wage = w * (1.0 - tax_l)
 
-    if utility_type == :inelastic
-
-        L = N[1]
-
-        AD = w * L + τrev
-
-        return L, AD
-
-    elseif utility_type == :GHH
-
-        L = ((w / Pces) / ψ) ^ (1 / γ)
-
-        AD = w * L + τrev
-
-        return L, AD
-
-    # elseif params.utility_type == :CRRA
-
-    #     using NLsolve
-
-    #     function F!(F, x)
-    #         c, l = x
-    #         F[1] = c - w * l * N - τrev
-    #         F[2] = (c^(-params.ε)) * w - l^params.γ
-    #     end
-
-    #     x0 = [1.0, 0.5]
-    #     sol = nlsolve(F!, x0)
-
-    #     if sol.converged
-    #         c, l = sol.zero
-    #         return l, c
-    #     else
-    #         error("Household labor-consumption solver failed to converge.")
-    #     end
-
+        if utility_type == :inelastic
+            L = N[1]
+            AD = after_tax_wage * L 
+        
+        elseif utility_type == :GHH
+            # Labor supply depends on the after-tax real wage
+            L = ((after_tax_wage / Pces) / ψ)^(1 / γ)
+            AD = after_tax_wage * L
+        end
+    
     else
-
-        error("Unknown utility_type: $(utility_type)")
-
+        error("Unknown rebate_type: $(rebate_type)")
     end
 
+    return L, AD
 end
 
+# function household_problem(params::armington_params, w, Pces, τrev)
 
+#     @unpack ψ, γ, N, utility_type = params
 
+#     # The effective wage rate is the after-tax wage
+#     after_tax_wage = w * (1.0 - tax_l)
+
+#     if utility_type == :inelastic
+
+#         L = N[1]
+
+#         AD = w * L + τrev
+
+#         return L, AD
+
+#     elseif utility_type == :GHH # Here we assume utility is U(c, l) = c - ψ * l^(1+γ) / (1+γ)
+
+#         L = ((w / Pces) / ψ) ^ (1 / γ)
+
+#         AD = w * L + τrev
+
+#         return L, AD
+
+#     # elseif params.utility_type == :CRRA
+
+#     #     using NLsolve
+
+#     #     function F!(F, x)
+#     #         c, l = x
+#     #         F[1] = c - w * l * N - τrev
+#     #         F[2] = (c^(-params.ε)) * w - l^params.γ
+#     #     end
+
+#     #     x0 = [1.0, 0.5]
+#     #     sol = nlsolve(F!, x0)
+
+#     #     if sol.converged
+#     #         c, l = sol.zero
+#     #         return l, c
+#     #     else
+#     #         error("Household labor-consumption solver failed to converge.")
+#     #     end
+
+#     else
+
+#         error("Unknown utility_type: $(utility_type)")
+
+#     end
+
+# end
+
+function calculate_utility(params::armington_params, trade::trade_stats)
+    
+    @unpack utility_type, ψ, γ, Ncntry = params
+
+    if utility_type == :GHH
+        # Full GHH Utility: Consumption - Disutility of Labor
+        C = trade.Qindex
+        L = trade.Ls
+        utility = @. C - (ψ / (1.0 + γ)) * L^(1.0 + γ)
+        return utility
+    else
+        # For inelastic labor, utility is equivalent to consumption
+        return trade.Qindex
+    end
+end
