@@ -10,6 +10,7 @@ using Plots
 ######################################################################################
 
 τvec = 0.0:0.01:0.5
+dtax = 0.0
 
 welfare_inelastic = Array{Float64}(undef, length(τvec))
 
@@ -20,11 +21,11 @@ labor_GHH = Array{Float64}(undef, length(τvec))
 
 for xxx in eachindex(τvec)
 
-    τ = [0.0 0.0; τvec[xxx] 0.0]
+    τ = [0.0 0.0; (τvec[xxx]+ dtax) dtax]
 
     armington_prm_inelastic = armington_params(τ = τ, utility_type = :inelastic)
 
-    armington_prm_GHH = armington_params(τ = τ, utility_type = :GHH, γ  = 2.0) 
+    armington_prm_GHH = armington_params(τ = τ, utility_type = :GHH, γ  = 1.5) 
     
     foo_inelastic,_,_ = find_equilibrium(armington_prm_inelastic)
 

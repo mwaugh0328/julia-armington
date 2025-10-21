@@ -11,7 +11,7 @@ using Plots
 
 τvec = 0.0:0.01:0.5
 
-τ = [0.0 τvec[1]; τvec[20] 0.0]
+τ = [0.0 τvec[1]; (τvec[1] + 0.1) 0.1]
 
 armington_prm_GHH = armington_params(τ = τ, utility_type = :GHH) 
 

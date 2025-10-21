@@ -14,6 +14,7 @@ using Parameters
     ψ::Float64 = 2.0 # disutility of labor parameter in GHH
     γ::Float64 = 1.0 # risk aversion parameter in GHH 
     utility_type::Symbol = :inelastic  # options: :inelastic, :GHH, :CRRA
+    wedges::Array{Float64} = [1.0, 1.0] # product wedges
 end
 
 @with_kw struct ces_output
