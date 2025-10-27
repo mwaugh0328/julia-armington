@@ -6,13 +6,13 @@ using Parameters
 ##########################################################################
 @with_kw struct armington_params
     σ::Float64 = 5.0 # elasticity of substitution across goods
-    d::Array{Float64} = [1.0  1.95; 1.95 1.0] # iceberg trade cost (row is importer, colume is exporter)
+    d::Array{Float64} = [1.0  1.5; 1.5 1.0] # iceberg trade cost (row is importer, colume is exporter)
     A::Array{Float64} = [1.0, 1.0] # productivity
     N::Array{Float64} = [1.0, 1.0] # population
     Ncntry::Int64 = length(A) # number of countries
     τ::Array{Float64} = zeros(length(A), length(A)) # tariff (row is importer, colume is exporter)
-    ψ::Float64 = 2.0 # disutility of labor parameter in GHH
-    γ::Float64 = 1.0 # risk aversion parameter in GHH 
+    ψ::Float64 = 1.0 # disutility of labor parameter in GHH
+    γ::Float64 = 1.0 # curvature parameter in GHH 
     utility_type::Symbol = :inelastic  # :inelastic, :GHH, :CRRA
     wedges::Array{Float64} = [1.0, 1.0] # product wedges
     rebate_type::Symbol = :lump_sum # :lump_sum, :labor_tax
@@ -44,7 +44,7 @@ end
 
 function goods_prices(params::armington_params, w, AD)
 
-    @unpack τ, d, A, Ncntry, σ = params
+    @unpack τ, d, A, Ncntry, wedges, σ = params
 
     @assert length(w) == Ncntry
     
@@ -58,7 +58,7 @@ function goods_prices(params::armington_params, w, AD)
 
             marginal_cost = (w[ex] / A[ex])
 
-            p[im, ex] = (1.0 + τ[im, ex]) * d[im, ex] * marginal_cost
+            p[im, ex] = (1.0 + τ[im, ex]) * d[im, ex] * wedges[ex] *marginal_cost
             # price is the marginal cost of production plus the cost of trade and the tariff
             
         end
@@ -75,7 +75,7 @@ end
 
 function goods_prices(params::armington_params, w)
 
-    @unpack τ, d, A, Ncntry, σ = params
+    @unpack τ, d, A, Ncntry, wedges, σ = params
 
     @assert length(w) == Ncntry
     
@@ -89,7 +89,7 @@ function goods_prices(params::armington_params, w)
 
             marginal_cost = (w[ex] / A[ex])
 
-            p[im, ex] = (1.0 + τ[im, ex]) * d[im, ex] * marginal_cost
+            p[im, ex] = (1.0 + τ[im, ex]) * d[im, ex] * wedges[ex] * marginal_cost
             # price is the marginal cost of production plus the cost of trade and the tariff
             
         end
@@ -150,20 +150,29 @@ end
 ##########################################################################
 ##########################################################################
 function profits(params::armington_params, demand, L)
+    # Teerat, this is where I think there may be a bug.
 
-    @unpack Ncntry, A, τ = params
+    @unpack Ncntry, A, τ, d = params
 
     prft = similar(L)
 
     for ex in 1:Ncntry
 
-        p_ex_tariff = demand[ex].p ./ (1 .+ τ[ex,:])
+        for im in 1:Ncntry
+            # Im a bit confused about the indexing here
 
-        total_revenue = sum( p_ex_tariff .* demand[ex].q )
+            p_ex_tariff = demand[im].p[ex] ./ (1 .+ τ[im, ex])
 
-        total_cost = demand[ex].w[ex] * L[ex]
+            total_revenue = p_ex_tariff .* demand[im].q[ex]
 
-        prft[ex] = total_revenue - total_cost
+            total_cost = demand[ex].w[ex] * ( d[im, ex] * demand[im].q[ex] / ( A[ex] ) )
+            # stuff in parentheses is labor needed as q(im, ex) = A(ex) * L(ex) / d(im, ex)
+            # to rearrange, L(ex) = d(im, ex) * q(im, ex) / A(ex)
+            # make sense?
+
+            prft[ex] += total_revenue - total_cost
+
+        end
 
     end
 
@@ -186,25 +195,32 @@ function trade_flows(params::armington_params, demand, L_vec)
     Pindex = Array{eltype(σ)}(undef, Ncntry)
     Qindex = Array{eltype(σ)}(undef, Ncntry)
     prft = Array{eltype(σ)}(undef, Ncntry)
+
+    # what I'm confused about is the demand structure and its indexing
  
     for im = 1:Ncntry # buyer
 
-            trade_value[im, :] = demand[im].p .* demand[im].q
+            for ex = 1:Ncntry # seller
+
+            trade_value[im, ex] = demand[im].p[ex] .* demand[im].q[ex]
             # this says fix a row, then across the columns, it shows how much of each good 
             # is being purchased by the importer country
 
-            trade_share[im, : ] = demand[im].shares
+            trade_share[im, ex] = demand[im].shares[ex]
 
-            τ_revenue[im, :] = @.  τ[im, :] * ( trade_value[im, :] / (1.0 + τ[im, : ]) )
+            τ_revenue[im, ex] = @.  τ[im, ex] * ( trade_value[im, ex] / (1.0 + τ[im, ex]) )
             # this is the tariff revenue that is being collected by the importer country
             # trade_value / (1 + τ) is the value of the good before the tariff is applied
             # the tariff is then applied to this value to get the revenue
 
-            p[im, :] = demand[im].p
+            p[im, ex] = demand[im].p[ex]
 
-            Pindex[im] = demand[im].P[1]
+            end
+            
 
-            Qindex[im] = demand[im].Q[1]
+            Pindex[im] = demand[im].P[1] # why is this [1] here? 
+
+            Qindex[im] = demand[im].Q[1] # why is this [1] here?
 
 
     end
@@ -214,6 +230,8 @@ function trade_flows(params::armington_params, demand, L_vec)
     world_demand = sum(trade_value ./ (1 .+ τ), dims = 1)[:]
     # sum down the rows give the total amount demanded of each good that exporter must produce.
     # This is pre-tariff value of exported goods.
+    
+    # I wonder here if this is correct given the wedges, another place to check
 
     trade = trade_stats(
         trade_value, trade_share, τ_revenue, world_demand, p, Pindex, Qindex, prft, L_vec
@@ -226,6 +244,14 @@ end
 ##########################################################################
 ##########################################################################
 function household_problem(params::armington_params, w, Pces, policy_var)
+    @unpack Ncntry = params
+    prfts = zeros(Ncntry)
+    return household_problem(params, w, Pces, policy_var, prfts)
+end
+
+
+
+function household_problem(params::armington_params, w, Pces, policy_var, prfts)
     
     @unpack ψ, γ, N, utility_type, rebate_type = params
 
@@ -238,11 +264,11 @@ function household_problem(params::armington_params, w, Pces, policy_var)
 
         if utility_type == :inelastic
             L = N[1]
-            AD = w * L + τrev
+            AD = w * L + τrev + prfts
         
         elseif utility_type == :GHH
             L = ((w / Pces) / ψ)^(1 / γ)
-            AD = w * L + τrev
+            AD = w * L + τrev + prfts
         end
 
     # --- Case 2: Tariff revenue is used to reduce the labor income tax ---
@@ -252,12 +278,12 @@ function household_problem(params::armington_params, w, Pces, policy_var)
 
         if utility_type == :inelastic
             L = N[1]
-            AD = after_tax_wage * L 
+            AD = after_tax_wage * L + prfts
         
         elseif utility_type == :GHH
             # Labor supply depends on the after-tax real wage
             L = ((after_tax_wage / Pces) / ψ)^(1 / γ)
-            AD = after_tax_wage * L
+            AD = after_tax_wage * L + prfts
         end
     
     else
@@ -331,5 +357,27 @@ function calculate_utility(params::armington_params, trade::trade_stats)
     else
         # For inelastic labor, utility is equivalent to consumption
         return trade.Qindex
+    end
+end
+
+function gain_ev_units(params::armington_params, trade_base::trade_stats, trade_new::trade_stats)
+    
+    @unpack utility_type, ψ, γ, Ncntry = params
+
+    if utility_type == :GHH
+        # Full GHH Utility: Consumption - Disutility of Labor
+        Cbase = trade_base.Qindex
+        Cnew = trade_new.Qindex
+        Lbase = trade_base.Ls   
+        Lnew = trade_new.Ls
+
+        lsblock = @. (ψ / (1.0 + γ)) * Lnew^(1.0 + γ) - (ψ / (1.0 + γ)) * Lbase^(1.0 + γ)
+
+        λ =  @. Cnew / Cbase - (1 / Cbase)* lsblock
+        return λ .- 1.0   
+
+    else
+        # For inelastic labor, utility is equivalent to consumption
+        return trade_new.Qindex ./ trade_base.Qindex .- 1.0
     end
 end
