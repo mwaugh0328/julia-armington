@@ -30,6 +30,7 @@ end
 @with_kw struct trade_stats
     trade_value::Array{Float64} # (Ncntry x Ncntry)
     trade_share::Array{Float64} # (Ncntry x Ncntry)
+    trade_labor::Array{Float64} # (Ncntry x Ncntry)
     τ_revenue::Array{Float64} # (Ncntry x Ncntry)
     world_demand::Array{Float64} # (Ncntry x 1)
     p::Array{Float64} # (Ncntry x Ncntry)
@@ -149,12 +150,11 @@ end
 
 ##########################################################################
 ##########################################################################
-function profits(params::armington_params, demand, L)
+function profits(params::armington_params, demand)
     # Teerat, this is where I think there may be a bug.
 
     @unpack Ncntry, A, τ, d = params
 
-    #prft = similar(L)
     prft = zeros(Ncntry)
 
     for ex in 1:Ncntry
@@ -169,7 +169,6 @@ function profits(params::armington_params, demand, L)
             total_cost = demand[ex].w[ex] * ( d[im, ex] * demand[im].q[ex] / ( A[ex] ) )
             # stuff in parentheses is labor needed as q(im, ex) = A(ex) * L(ex) / d(im, ex)
             # to rearrange, L(ex) = d(im, ex) * q(im, ex) / A(ex)
-            # make sense?
 
             prft[ex] += total_revenue - total_cost
 
@@ -186,10 +185,11 @@ end
 
 function trade_flows(params::armington_params, demand, L_vec)
 
-    @unpack Ncntry, τ, σ = params
+    @unpack Ncntry, τ, σ, d, A = params
 
     trade_value = Array{eltype(σ)}(undef, Ncntry, Ncntry)
     trade_share = Array{eltype(σ)}(undef, Ncntry, Ncntry)
+    trade_labor = Array{eltype(σ)}(undef, Ncntry, Ncntry)
     τ_revenue = Array{eltype(σ)}(undef, Ncntry, Ncntry)
     p = Array{eltype(σ)}(undef, Ncntry, Ncntry)
 
@@ -203,30 +203,31 @@ function trade_flows(params::armington_params, demand, L_vec)
 
             for ex = 1:Ncntry # seller
 
-            trade_value[im, ex] = demand[im].p[ex] .* demand[im].q[ex]
-            # this says fix a row, then across the columns, it shows how much of each good 
-            # is being purchased by the importer country
+                trade_value[im, ex] = demand[im].p[ex] .* demand[im].q[ex]
+                # this says fix a row, then across the columns, it shows how much of each good 
+                # is being purchased by the importer country
 
-            trade_share[im, ex] = demand[im].shares[ex]
+                trade_labor[im, ex] = ( demand[im].q[ex] * d[im, ex] ) / ( A[ex] ) 
+                # amount of labor used to produced by exporter including trade costs
 
-            τ_revenue[im, ex] = @.  τ[im, ex] * ( trade_value[im, ex] / (1.0 + τ[im, ex]) )
-            # this is the tariff revenue that is being collected by the importer country
-            # trade_value / (1 + τ) is the value of the good before the tariff is applied
-            # the tariff is then applied to this value to get the revenue
+                trade_share[im, ex] = demand[im].shares[ex]
 
-            p[im, ex] = demand[im].p[ex]
+                τ_revenue[im, ex] = @.  τ[im, ex] * ( trade_value[im, ex] / (1.0 + τ[im, ex]) )
+                # this is the tariff revenue that is being collected by the importer country
+                # trade_value / (1 + τ) is the value of the good before the tariff is applied
+                # the tariff is then applied to this value to get the revenue
+
+                p[im, ex] = demand[im].p[ex]
 
             end
             
-
             Pindex[im] = demand[im].P[1] # why is this [1] here? 
 
             Qindex[im] = demand[im].Q[1] # why is this [1] here?
 
-
     end
 
-    prft = profits(params, demand, L_vec)
+    prft = profits(params, demand)
     
     world_demand = sum(trade_value ./ (1 .+ τ), dims = 1)[:]
     # sum down the rows give the total amount demanded of each good that exporter must produce.
@@ -235,7 +236,7 @@ function trade_flows(params::armington_params, demand, L_vec)
     # I wonder here if this is correct given the wedges, another place to check
 
     trade = trade_stats(
-        trade_value, trade_share, τ_revenue, world_demand, p, Pindex, Qindex, prft, L_vec
+        trade_value, trade_share, trade_labor, τ_revenue, world_demand, p, Pindex, Qindex, prft, L_vec
         )
 
     return trade
@@ -246,7 +247,9 @@ end
 ##########################################################################
 function household_problem(params::armington_params, w, Pces, policy_var)
     @unpack Ncntry = params
+    
     prfts = zeros(Ncntry)
+
     return household_problem(params, w, Pces, policy_var, prfts)
 end
 
@@ -294,56 +297,8 @@ function household_problem(params::armington_params, w, Pces, policy_var, prfts)
     return L, AD
 end
 
-# function household_problem(params::armington_params, w, Pces, τrev)
-
-#     @unpack ψ, γ, N, utility_type = params
-
-#     # The effective wage rate is the after-tax wage
-#     after_tax_wage = w * (1.0 - tax_l)
-
-#     if utility_type == :inelastic
-
-#         L = N[1]
-
-#         AD = w * L + τrev
-
-#         return L, AD
-
-#     elseif utility_type == :GHH # Here we assume utility is U(c, l) = c - ψ * l^(1+γ) / (1+γ)
-
-#         L = ((w / Pces) / ψ) ^ (1 / γ)
-
-#         AD = w * L + τrev
-
-#         return L, AD
-
-#     # elseif params.utility_type == :CRRA
-
-#     #     using NLsolve
-
-#     #     function F!(F, x)
-#     #         c, l = x
-#     #         F[1] = c - w * l * N - τrev
-#     #         F[2] = (c^(-params.ε)) * w - l^params.γ
-#     #     end
-
-#     #     x0 = [1.0, 0.5]
-#     #     sol = nlsolve(F!, x0)
-
-#     #     if sol.converged
-#     #         c, l = sol.zero
-#     #         return l, c
-#     #     else
-#     #         error("Household labor-consumption solver failed to converge.")
-#     #     end
-
-#     else
-
-#         error("Unknown utility_type: $(utility_type)")
-
-#     end
-
-# end
+##########################################################################
+##########################################################################
 
 function calculate_utility(params::armington_params, trade::trade_stats)
     
@@ -360,6 +315,9 @@ function calculate_utility(params::armington_params, trade::trade_stats)
         return trade.Qindex
     end
 end
+
+###########################################################################
+###########################################################################
 
 function gain_ev_units(params::armington_params, trade_base::trade_stats, trade_new::trade_stats)
     

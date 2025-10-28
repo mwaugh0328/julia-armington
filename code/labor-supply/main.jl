@@ -11,10 +11,11 @@ using Plots
 ######################################################################################
 
 τvec = 0.0:0.01:0.75
-dtax = 0.33
 γ = 0.5 # this should correspond to Frisch elasticity of 2 (like in Alessandria paper)
 ψ = 1.0
 σ = 5.0
+
+wedges = [1.0, 1.0]
 
 # Allocate arrays for lump-sum policy
 cons_inelastic = Array{Float64}(undef, length(τvec))
@@ -32,26 +33,30 @@ cons_GHH_labortax = Array{Float64}(undef, length(τvec))
 labor_GHH_labortax = Array{Float64}(undef, length(τvec))
 
 
-τ = [0.0 0.0; (0.04 + dtax) dtax]
+τ = [0.0 0.0; (0.04 + 0.0) 0.0]
 
-armington_prm_inelastic = armington_params(τ = τ, utility_type = :inelastic, rebate_type = :lump_sum, σ = σ)
-armington_prm_GHH = armington_params(τ = τ, utility_type = :GHH, rebate_type = :lump_sum, γ  = γ, ψ = ψ, σ = σ)
+armington_prm_inelastic = armington_params(τ = τ, utility_type = :inelastic, rebate_type = :lump_sum, σ = σ, wedges = wedges)
+
+armington_prm_GHH = armington_params(τ = τ, utility_type = :GHH, rebate_type = :lump_sum, γ  = γ, ψ = ψ, σ = σ, wedges = wedges)
+
 base_inelastic,_,_ = find_equilibrium(armington_prm_inelastic)
 base_GHH,_,_ = find_equilibrium(armington_prm_GHH)
 
-armington_prm_GHH_labortax = armington_params(τ = τ, utility_type = :GHH, rebate_type = :labor_tax, γ  = γ, ψ = ψ, σ = σ)
+armington_prm_GHH_labortax = armington_params(τ = τ, utility_type = :GHH, rebate_type = :labor_tax, γ  = γ, ψ = ψ, σ = σ, wedges = wedges)
 base_GHH_labortax,_,_ = find_equilibrium(armington_prm_GHH_labortax)
 
 
 for xxx in eachindex(τvec)
 
-    τ = [0.0 0.0; (τvec[xxx]+ dtax) dtax]
+    τ = [0.0 0.0; (τvec[xxx] + 0.0) 0.0]
 
     # --- Original models (lump-sum rebate) ---
-    armington_prm_inelastic = armington_params(τ = τ, utility_type = :inelastic, rebate_type = :lump_sum, σ = σ)
-    armington_prm_GHH = armington_params(τ = τ, utility_type = :GHH, rebate_type = :lump_sum, γ  = γ, ψ = ψ, σ = σ)
-    sol_inelastic,_,_ = find_equilibrium(armington_prm_inelastic)
-    sol_GHH,_,_ = find_equilibrium(armington_prm_GHH)
+    armington_prm_inelastic = armington_params(τ = τ, utility_type = :inelastic, rebate_type = :lump_sum, σ = σ, wedges = wedges)
+
+    armington_prm_GHH = armington_params(τ = τ, utility_type = :GHH, rebate_type = :lump_sum, γ  = γ, ψ = ψ, σ = σ, wedges = wedges)
+
+    sol_inelastic = find_equilibrium(armington_prm_inelastic)[1]
+    sol_GHH = find_equilibrium(armington_prm_GHH)[1]
 
     cons_inelastic[xxx] = sol_inelastic.Qindex[2]
     cons_GHH[xxx] = sol_GHH.Qindex[2]
@@ -62,8 +67,9 @@ for xxx in eachindex(τvec)
     labor_inelastic[xxx] = sol_inelastic.Ls[2]
 
     # --- Labor tax reduction ---
-    armington_prm_GHH_labortax = armington_params(τ = τ, utility_type = :GHH, rebate_type = :labor_tax, γ  = γ, ψ = ψ, σ = σ)
-    sol_GHH_labortax,_,_ = find_equilibrium(armington_prm_GHH_labortax)
+    armington_prm_GHH_labortax = armington_params(τ = τ, utility_type = :GHH, rebate_type = :labor_tax, γ  = γ, ψ = ψ, σ = σ, wedges = wedges)
+
+    sol_GHH_labortax = find_equilibrium(armington_prm_GHH_labortax)[1]
 
     cons_GHH_labortax[xxx] = sol_GHH_labortax.Qindex[2]
     welfare_GHH_labortax[xxx] = gain_ev_units(armington_prm_GHH_labortax, base_GHH_labortax, sol_GHH_labortax)[2]
@@ -94,7 +100,7 @@ dfout = DataFrame(τ = τvec,
     labor_GHH = labor_GHH,
     labor_GHH_labortax = labor_GHH_labortax)
 
-CSV.write("labor-supply-results-wedge.csv", dfout)
+CSV.write("labor-supply-results-no-wedge.csv", dfout)
 
 
 # ######################################################################################

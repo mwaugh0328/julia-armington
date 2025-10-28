@@ -41,7 +41,7 @@ function find_equilibrium(params::armington_params)
     policy_sol = sol.x[w_end+1:policy_end]
     prft_sol = sol.x[policy_end+1:end]
 
-    trade = find_equilibrium(w_sol, policy_sol, prft_sol, params, display = true)
+    trade = find_equilibrium(w_sol, policy_sol, prft_sol, params, display = true)[1]
 
     return trade, w_sol, policy_sol, prft_sol
 
@@ -193,7 +193,7 @@ function find_equilibrium(w, policy_var, prfts, params::armington_params; displa
 
     if display 
 
-        return trade
+        return trade, demand
 
     else
 
@@ -219,9 +219,12 @@ function compute_market_clearing(w, Ls, trade::trade_stats)
 
     profits = trade.prft
 
+    labor_market_residual = sum(trade.trade_labor, dims = 2) .- Ls
+
     # In equilibrium, these must be equal
     #return total_labor_income .- total_producer_revenue
     return (total_labor_income .+ profits) .- total_producer_revenue
+    #return labor_market_residual 
 end
 
 ##########################################################################
