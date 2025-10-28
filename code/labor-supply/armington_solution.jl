@@ -1,6 +1,8 @@
 
 function find_equilibrium(params::armington_params)
 
+    @unpack Ncntry = params
+
     f(x) = find_equilibrium(x, params)
 
     function f!(fvec, x)
@@ -9,7 +11,11 @@ function find_equilibrium(params::armington_params)
 
     end
 
-    xguess = [1.0 ; 0.0 ; 0.0]
+    w_guess = ones(Ncntry - 1)
+    policy_guess = zeros(Ncntry)
+    prft_guess = zeros(Ncntry)
+
+    xguess = vcat(w_guess, policy_guess, prft_guess)
 
     n = length(xguess)
     diag_adjust = n - 1
@@ -26,13 +32,18 @@ function find_equilibrium(params::armington_params)
 
     end
 
-    w = [sol.x[1]; 1.0]
+    # We need to unpack the final solution vector 'sol.x'
+    w_end = Ncntry - 1
+    policy_end = w_end + Ncntry
+    # The rest is the prft_slice
 
-    policy_var = sol.x[2:end]
+    w_sol = [sol.x[1:w_end]; 1.0] # add back numeraire wage
+    policy_sol = sol.x[w_end+1:policy_end]
+    prft_sol = sol.x[policy_end+1:end]
 
-    trade = find_equilibrium(w, policy_var, params, display = true)
+    trade = find_equilibrium(w_sol, policy_sol, prft_sol, params, display = true)
 
-    return trade, w, policy_var
+    return trade, w_sol, policy_sol, prft_sol
 
 end
 
@@ -43,17 +54,23 @@ function find_equilibrium(xxx, params::armington_params)
    
     @unpack Ncntry = params
 
-    w = xxx[1:Ncntry - 1]
+    w_end = Ncntry - 1
+    policy_end = w_end + Ncntry
+    # The rest of the vector is for profits
+
+    w = xxx[1:w_end]
 
     push!(w, 1.0) # add the numeraire (wage in the last country)
 
     #w = w ./ ( sum(w) / params.Ncntry)
 
-    policy_var = xxx[Ncntry:end]
+    policy = xxx[w_end+1:policy_end]
 
-    @assert length(w) == length(policy_var)
+    prft = xxx[policy_end+1:end]
 
-    return find_equilibrium(w, policy_var, params)
+    @assert length(w) == length(policy)
+
+    return find_equilibrium(w, policy, prft, params)
 
 end
 
@@ -66,7 +83,7 @@ function find_equilibrium(w, policy_var, params::armington_params; display = fal
 
     @unpack A, Ncntry, N, utility_type, rebate_type = params
 
-    # --- Step 1: Solve household problem to get AD and Ls ---
+    # Step 1: Solve household problem to get AD and Ls 
     Pces = goods_prices(params, w)
     AD_vec = similar(w)
     L_vec = similar(w)
@@ -130,7 +147,7 @@ function find_equilibrium(w, policy_var, prfts, params::armington_params; displa
 
     @unpack A, Ncntry, N, utility_type, rebate_type = params
 
-    # --- Step 1: Solve household problem to get AD and Ls ---
+    # Step 1: Solve household problem to get AD and Ls 
     Pces = goods_prices(params, w)
     AD_vec = similar(w)
     L_vec = similar(w)
@@ -188,7 +205,8 @@ function find_equilibrium(w, policy_var, prfts, params::armington_params; displa
 
 end
 
-
+##########################################################################
+##########################################################################
 
 function compute_market_clearing(w, Ls, trade::trade_stats)
     
@@ -199,8 +217,11 @@ function compute_market_clearing(w, Ls, trade::trade_stats)
     # trade.world_demand is the pre-tariff value of goods demanded from each exporter.
     total_producer_revenue = trade.world_demand
 
+    profits = trade.prft
+
     # In equilibrium, these must be equal
-    return total_labor_income .- total_producer_revenue
+    #return total_labor_income .- total_producer_revenue
+    return (total_labor_income .+ profits) .- total_producer_revenue
 end
 
 ##########################################################################

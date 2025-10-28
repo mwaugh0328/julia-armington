@@ -154,7 +154,8 @@ function profits(params::armington_params, demand, L)
 
     @unpack Ncntry, A, τ, d = params
 
-    prft = similar(L)
+    #prft = similar(L)
+    prft = zeros(Ncntry)
 
     for ex in 1:Ncntry
 
